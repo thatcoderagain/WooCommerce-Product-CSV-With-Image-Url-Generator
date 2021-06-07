@@ -79,10 +79,11 @@ def writeImagesURLToSpreadSheet(dateColumn1, dateColumn2):
                                                     valueInputOption="USER_ENTERED", body=value_range_body).execute()
 
 
-def customFilter(x, targets):
+def customFilter(string, targets):
     for target in targets:
-        x = x.replace(target, '')
-    return x
+        string = string[len(target):] if string.startswith(target) else string
+        string = string[:len(string)-len(target)] if string.endswith(target) else string
+    return string
 
 
 def generateURLList():
@@ -123,7 +124,7 @@ def generateURLList():
                 imagesSet[skuId] = imagesSet[skuId] + ls
                 imagesSet[skuId] = list(set(imagesSet[skuId]))
 
-    if EXPORT_METHOD == 'exportToLocal':
+    if SKU_READ_METHOD == 'readFromLocal' or EXPORT_METHOD == 'exportToLocal':
         AD3 = open('AD3.csv', 'w')
         AN3 = open('AN3.csv', 'w')
         for skuId in skuIds:
@@ -135,6 +136,8 @@ def generateURLList():
         for skuId in skuIds:
             AD3.append([",".join(imagesSet[skuId][:1])])
             AN3.append([",".join(imagesSet[skuId][1:])])
+        AD3 = AD3 + [['']]*(1000 - len(AD3))
+        AN3 = AN3 + [['']]*(1000 - len(AN3))
         writeImagesURLToSpreadSheet(AD3, AN3)
 
     updateConfig(createConfig())
@@ -197,7 +200,6 @@ class Widgets(QWidget):
         self.radiobuttonReadSKUGoogleSpreadSheet.setFixedWidth(350)
         self.radiobuttonReadSKUGoogleSpreadSheet.method = "readFromGoogleSpreadSheet"
         self.radiobuttonReadSKUGoogleSpreadSheet.toggled.connect(self.onSKUReadMethodToggled)
-        self.radiobuttonReadSKULocal.setChecked(True)
         self.buttonGroupSkuRead.addButton(self.radiobuttonReadSKULocal)
         self.buttonGroupSkuRead.addButton(self.radiobuttonReadSKUGoogleSpreadSheet)
         self.horizontalLayoutSkuReadMethod.addWidget(self.labelSkuReadMethod)
@@ -223,7 +225,6 @@ class Widgets(QWidget):
         self.horizontalLayoutSkuReadMethod.addWidget(self.labelSkuReadMethod)
         self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonExportUrlLocal)
         self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonExportUrlGoogleSpreadSheet)
-        self.radiobuttonExportUrlLocal.setChecked(True)
         self.labelSkuReadMethod.hide()
         self.radiobuttonExportUrlLocal.hide()
         self.radiobuttonExportUrlGoogleSpreadSheet.hide()
@@ -247,6 +248,14 @@ class Widgets(QWidget):
         self.verticalLayout.addWidget(self.buttonSubmit)
         self.setLayout(self.verticalLayout)
 
+        if (SKU_READ_METHOD == 'readFromLocal'):
+            self.radiobuttonReadSKULocal.setChecked(True)
+        else:
+            self.radiobuttonReadSKUGoogleSpreadSheet.setChecked(True)
+            if (EXPORT_METHOD == 'exportToLocal'):
+                self.radiobuttonExportUrlLocal.setChecked(True)
+            else:
+                self.radiobuttonExportUrlGoogleSpreadSheet.setChecked(True)
 
     def onSKUReadMethodToggled(self):
         global SKU_READ_METHOD, EXPORT_METHOD
@@ -273,7 +282,6 @@ class Widgets(QWidget):
         global SKU_READ_METHOD, EXPORT_METHOD
         radiobuttonExportUrl = self.sender()
         if radiobuttonExportUrl.method in ['exportToLocal', 'exportToGoogleSpreadSheet']:
-            SKU_READ_METHOD = 'readFromGoogleSpreadSheet'
             EXPORT_METHOD = radiobuttonExportUrl.method
 
     def onButtonSKUFilePickerClick(self):
@@ -291,6 +299,7 @@ class Widgets(QWidget):
     def onButtonSubmitClick(self):
         global BASE_IMAGE_PATH_URL, SKU_ID_EXTRAS, IMAGES_FOLDER, SKU_FILE, SKU_READ_METHOD
         msg = ""
+        self.buttonSubmit.setEnabled(False)
         if (self.lineEditBaseImageUrl.text().startswith('https://')):
             BASE_IMAGE_PATH_URL = self.lineEditBaseImageUrl.text().strip()
             if (BASE_IMAGE_PATH_URL.endswith('/') == False):
@@ -326,6 +335,7 @@ class Widgets(QWidget):
         msg.setDetailedText(f"The details are as follows:\n{msgText}")
         msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         msg.exec_()
+        self.buttonSubmit.setEnabled(True)
 
     def folderPicker(self):
         directory = QFileDialog.getExistingDirectory(self, "Select a folder", "./")
