@@ -1,5 +1,6 @@
 import os, sys
 import json
+import pandas
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
@@ -10,6 +11,7 @@ BASE_IMAGE_PATH_URL = 'https://homefabindia.com/wp-content/uploads/images/produc
 SKU_ID_EXTRAS = ['5F','6F','7F','8F','9F','Setof2']
 IMAGES_FOLDER = 'Converted images'
 SKU_FILE = 'SKU_List.txt'
+EXCEL_FILE = 'Products.xlsx'
 SKU_READ_METHOD = 'readFromLocal'
 EXPORT_METHOD = 'exportToLocal'
 
@@ -27,6 +29,7 @@ def createConfig():
     configDict['SKU_ID_EXTRAS'] = sorted(SKU_ID_EXTRAS)
     configDict['IMAGES_FOLDER'] = IMAGES_FOLDER
     configDict['SKU_FILE'] = SKU_FILE
+    configDict['EXCEL_FILE'] = EXCEL_FILE
     configDict['SKU_READ_METHOD'] = SKU_READ_METHOD
     configDict['EXPORT_METHOD'] = EXPORT_METHOD
     configDict['SAMPLE_SPREADSHEET_ID'] = SAMPLE_SPREADSHEET_ID
@@ -58,6 +61,33 @@ def updateConfig(configDict):
         os.remove('app.config.bak')
 
 
+def readExcel(path, sheetName='Sheet1'):
+    path = path.replace('\\', '/')
+    excel = pandas.read_excel(path, sheet_name=sheetName)
+    data = list()
+    data = data + [list(map(lambda x: x, excel.columns))]
+    for index, row in excel.iterrows():
+        data = data + [list(map(lambda x: x, row))]
+    return data
+
+
+def writeToSpreadSheet(range, data):
+    global SERVICE_ACCOUNT_FILE, SCOPES, CREDENTIALS, SAMPLE_SPREADSHEET_ID, WRITE_RANGE_NAME_1, WRITE_RANGE_NAME_2
+    service = build('sheets', 'v4', credentials=CREDENTIALS)
+    value_range_body = {}
+    value_range_body['values'] = data
+    response = service.spreadsheets().values().update(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=range,
+                                                    valueInputOption="USER_ENTERED", body=value_range_body).execute()
+
+
+def clearSheet(sheetName):
+    global CREDENTIALS
+    service = build('sheets', 'v4', credentials=CREDENTIALS)
+    rangeAll = '{0}!A1:ZZ'.format(sheetName)
+    response = service.spreadsheets().values().clear(spreadsheetId=SAMPLE_SPREADSHEET_ID, body={},
+                                                    range='{0}!A1:Z'.format(sheetName)).execute()
+
+
 def readSKUIdsFromSpreadSheet():
     global SERVICE_ACCOUNT_FILE, SCOPES, CREDENTIALS, SAMPLE_SPREADSHEET_ID, READ_RANGE_NAME
     service = build('sheets', 'v4', credentials=CREDENTIALS)
@@ -87,7 +117,6 @@ def customFilter(string, targets):
 
 
 def generateURLList():
-    global configDict
     if (os.path.isdir(IMAGES_FOLDER) == False):
         return [False, "Oops! Images folder not found"]
 
@@ -100,9 +129,18 @@ def generateURLList():
         return [False, "Oops! Images not found in the selected folder"]
 
     if SKU_READ_METHOD == 'readFromLocal':
+        if (os.path.exists(SKU_FILE) == False):
+            return [False, "Oops! SKU file not found"]
         skuFile = open(SKU_FILE, 'r')
         skuIds = skuFile.readlines()
     elif SKU_READ_METHOD == 'readFromGoogleSpreadSheet':
+        skuIds = readSKUIdsFromSpreadSheet()
+    elif SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet':
+        if (os.path.exists(EXCEL_FILE) == False):
+            return [False, "Oops! Product excel file not found"]
+        data = readExcel(EXCEL_FILE, 'Data')
+        response = clearSheet('Data')
+        response = writeToSpreadSheet('Data!A1', data)
         skuIds = readSKUIdsFromSpreadSheet()
 
     skuIds = map(lambda x: (x.strip()), skuIds)
@@ -130,7 +168,7 @@ def generateURLList():
         for skuId in skuIds:
             AD3.write(",".join(imagesSet[skuId][:1])+'\n')
             AN3.write(",".join(imagesSet[skuId][1:])+'\n')
-    elif EXPORT_METHOD == 'exportToGoogleSpreadSheet':
+    elif SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet' or EXPORT_METHOD == 'exportUrlToGoogleSpreadSheet':
         AD3 = []
         AN3 = []
         for skuId in skuIds:
@@ -149,7 +187,7 @@ class Widgets(QWidget):
         super(Widgets, self).__init__()
 
         self.setWindowTitle("Khushi Tool")
-        self.setGeometry(100,100,800,250)
+        self.setGeometry(100,100,900,250)
         self.move(200,200)
 
         self.verticalLayout = QVBoxLayout()
@@ -160,7 +198,7 @@ class Widgets(QWidget):
         self.labelBaseImageUrl.setText("Base image url ")
         self.horizontalLayoutBaseImageUrl.addWidget(self.labelBaseImageUrl)
         self.lineEditBaseImageUrl = QLineEdit()
-        self.lineEditBaseImageUrl.setFixedWidth(562)
+        self.lineEditBaseImageUrl.setFixedWidth(712)
         self.lineEditBaseImageUrl.setText(BASE_IMAGE_PATH_URL)
         self.horizontalLayoutBaseImageUrl.addWidget(self.lineEditBaseImageUrl)
         self.verticalLayout.addLayout(self.horizontalLayoutBaseImageUrl)
@@ -170,7 +208,7 @@ class Widgets(QWidget):
         self.labelSkuIdVariations.setText("SKU variations ")
         self.horizontalLayoutSKUVariations.addWidget(self.labelSkuIdVariations)
         self.lineEditSkuIdVariations = QLineEdit()
-        self.lineEditSkuIdVariations.setFixedWidth(562)
+        self.lineEditSkuIdVariations.setFixedWidth(712)
         self.lineEditSkuIdVariations.setText(",".join(SKU_ID_EXTRAS))
         self.horizontalLayoutSKUVariations.addWidget(self.lineEditSkuIdVariations)
         self.verticalLayout.addLayout(self.horizontalLayoutSKUVariations)
@@ -180,12 +218,13 @@ class Widgets(QWidget):
         self.labelImagesFolder.setText("Images Folder ")
         self.horizontalLayoutImagesFolderName.addWidget(self.labelImagesFolder)
         self.lineEditImageFolder = QLineEdit()
-        self.lineEditImageFolder.setFixedWidth(350)
+        self.lineEditImageFolder.setFixedWidth(500)
         self.lineEditImageFolder.setText(IMAGES_FOLDER)
         self.horizontalLayoutImagesFolderName.addWidget(self.lineEditImageFolder)
-        self.buttonSKUFilePicker = QPushButton("Browse (Images) ")
-        self.buttonSKUFilePicker.clicked.connect(self.onButtonImageFolderPickerClick)
-        self.horizontalLayoutImagesFolderName.addWidget(self.buttonSKUFilePicker)
+        self.buttonSkuFilePicker = QPushButton("Browse (Images) ")
+        self.buttonSkuFilePicker.setFixedWidth(205)
+        self.buttonSkuFilePicker.clicked.connect(self.onButtonImageFolderPickerClick)
+        self.horizontalLayoutImagesFolderName.addWidget(self.buttonSkuFilePicker)
         self.verticalLayout.addLayout(self.horizontalLayoutImagesFolderName)
 
         self.horizontalLayoutSkuReadMethod = QHBoxLayout()
@@ -193,18 +232,24 @@ class Widgets(QWidget):
         self.labelSkuReadMethod = QLabel()
         self.labelSkuReadMethod.setText("SKU Read Method")
         self.radiobuttonReadSKULocal = QRadioButton("Local File")
-        self.radiobuttonReadSKULocal.setFixedWidth(200)
+        self.radiobuttonReadSKULocal.setFixedWidth(170)
         self.radiobuttonReadSKULocal.method = "readFromLocal"
         self.radiobuttonReadSKULocal.toggled.connect(self.onSKUReadMethodToggled)
         self.radiobuttonReadSKUGoogleSpreadSheet = QRadioButton("Google SpreadSheet")
-        self.radiobuttonReadSKUGoogleSpreadSheet.setFixedWidth(350)
+        self.radiobuttonReadSKUGoogleSpreadSheet.setFixedWidth(200)
         self.radiobuttonReadSKUGoogleSpreadSheet.method = "readFromGoogleSpreadSheet"
         self.radiobuttonReadSKUGoogleSpreadSheet.toggled.connect(self.onSKUReadMethodToggled)
+        self.radiobuttonUploadProductToGoogleSpreadSheet = QRadioButton("Import Product + Upload to SpreadSheet")
+        self.radiobuttonUploadProductToGoogleSpreadSheet.setFixedWidth(330)
+        self.radiobuttonUploadProductToGoogleSpreadSheet.method = "readExcelAndExportProductToGoogleSpreadSheet"
+        self.radiobuttonUploadProductToGoogleSpreadSheet.toggled.connect(self.onSKUReadMethodToggled)
         self.buttonGroupSkuRead.addButton(self.radiobuttonReadSKULocal)
         self.buttonGroupSkuRead.addButton(self.radiobuttonReadSKUGoogleSpreadSheet)
+        self.buttonGroupSkuRead.addButton(self.radiobuttonUploadProductToGoogleSpreadSheet)
         self.horizontalLayoutSkuReadMethod.addWidget(self.labelSkuReadMethod)
         self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonReadSKULocal)
         self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonReadSKUGoogleSpreadSheet)
+        self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonUploadProductToGoogleSpreadSheet)
         self.verticalLayout.addLayout(self.horizontalLayoutSkuReadMethod)
 
 
@@ -214,20 +259,20 @@ class Widgets(QWidget):
         self.labelSkuReadMethod.setText("Export Method")
         self.radiobuttonExportUrlLocal = QRadioButton("Generate .csv files")
         self.radiobuttonExportUrlLocal.method = "exportToLocal"
-        self.radiobuttonExportUrlLocal.setFixedWidth(200)
+        self.radiobuttonExportUrlLocal.setFixedWidth(170)
         self.radiobuttonExportUrlLocal.toggled.connect(self.onExportMethodToggled)
-        self.radiobuttonExportUrlGoogleSpreadSheet = QRadioButton("Upload to Google SpreadSheet")
-        self.radiobuttonExportUrlGoogleSpreadSheet.setFixedWidth(350)
-        self.radiobuttonExportUrlGoogleSpreadSheet.method = "exportToGoogleSpreadSheet"
-        self.radiobuttonExportUrlGoogleSpreadSheet.toggled.connect(self.onExportMethodToggled)
+        self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet = QRadioButton("Export Urls to SpreadSheet")
+        self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.setFixedWidth(535)
+        self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.method = "exportUrlToGoogleSpreadSheet"
+        self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.toggled.connect(self.onExportMethodToggled)
         self.buttonGroupExportUrl.addButton(self.radiobuttonExportUrlLocal)
-        self.buttonGroupExportUrl.addButton(self.radiobuttonExportUrlGoogleSpreadSheet)
+        self.buttonGroupExportUrl.addButton(self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet)
         self.horizontalLayoutSkuReadMethod.addWidget(self.labelSkuReadMethod)
         self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonExportUrlLocal)
-        self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonExportUrlGoogleSpreadSheet)
+        self.horizontalLayoutSkuReadMethod.addWidget(self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet)
         self.labelSkuReadMethod.hide()
         self.radiobuttonExportUrlLocal.hide()
-        self.radiobuttonExportUrlGoogleSpreadSheet.hide()
+        self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.hide()
         self.verticalLayout.addLayout(self.horizontalLayoutSkuReadMethod)
 
         self.horizontalLayoutSKUFilename = QHBoxLayout()
@@ -235,60 +280,104 @@ class Widgets(QWidget):
         self.labelSkuIdFilename.setText("SKU Filename ")
         self.horizontalLayoutSKUFilename.addWidget(self.labelSkuIdFilename)
         self.lineEditSkuIdFilename = QLineEdit()
-        self.lineEditSkuIdFilename.setFixedWidth(350)
+        self.lineEditSkuIdFilename.setFixedWidth(500)
         self.lineEditSkuIdFilename.setText(SKU_FILE)
         self.horizontalLayoutSKUFilename.addWidget(self.lineEditSkuIdFilename)
-        self.buttonSKUFilePicker = QPushButton("Browse (SKU List.txt) ")
-        self.buttonSKUFilePicker.clicked.connect(self.onButtonSKUFilePickerClick)
-        self.horizontalLayoutSKUFilename.addWidget(self.buttonSKUFilePicker)
+        self.buttonSkuFilePicker = QPushButton("Browse (SKU List.txt) ")
+        self.buttonSkuFilePicker.setFixedWidth(205)
+        self.buttonSkuFilePicker.clicked.connect(self.onButtonSkuFilePickerClick)
+        self.horizontalLayoutSKUFilename.addWidget(self.buttonSkuFilePicker)
         self.verticalLayout.addLayout(self.horizontalLayoutSKUFilename)
+
+        self.horizontalLayoutExcelFilePicker = QHBoxLayout()
+        self.labelExcelFilename = QLabel()
+        self.labelExcelFilename.setText("Product File ")
+        self.horizontalLayoutExcelFilePicker.addWidget(self.labelExcelFilename)
+        self.lineEditExcelFilename = QLineEdit()
+        self.lineEditExcelFilename.setFixedWidth(500)
+        self.lineEditExcelFilename.setText(EXCEL_FILE)
+        self.horizontalLayoutExcelFilePicker.addWidget(self.lineEditExcelFilename)
+        self.buttonExcelFilename = QPushButton("Browse (Products.xlsx)")
+        self.buttonExcelFilename.setFixedWidth(205)
+        self.buttonExcelFilename.clicked.connect(self.onButtonExcelFilePickerClick)
+        self.horizontalLayoutExcelFilePicker.addWidget(self.buttonExcelFilename)
+        self.verticalLayout.addLayout(self.horizontalLayoutExcelFilePicker)
 
         self.buttonSubmit = QPushButton("Generate")
         self.buttonSubmit.clicked.connect(self.onButtonSubmitClick)
         self.verticalLayout.addWidget(self.buttonSubmit)
         self.setLayout(self.verticalLayout)
 
-        if (SKU_READ_METHOD == 'readFromLocal'):
+        if SKU_READ_METHOD == 'readFromLocal':
             self.radiobuttonReadSKULocal.setChecked(True)
-        else:
+        elif SKU_READ_METHOD == 'readFromGoogleSpreadSheet':
             self.radiobuttonReadSKUGoogleSpreadSheet.setChecked(True)
-            if (EXPORT_METHOD == 'exportToLocal'):
+            if EXPORT_METHOD == 'exportToLocal':
                 self.radiobuttonExportUrlLocal.setChecked(True)
-            else:
-                self.radiobuttonExportUrlGoogleSpreadSheet.setChecked(True)
+            elif EXPORT_METHOD == 'exportUrlToGoogleSpreadSheet':
+                self.radiobuttonUploadProductToGoogleSpreadSheet.setChecked(True)
+        elif SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet':
+            self.radiobuttonUploadProductToGoogleSpreadSheet.setChecked(True)
 
     def onSKUReadMethodToggled(self):
         global SKU_READ_METHOD, EXPORT_METHOD
         radiobuttonReadSKU = self.sender()
-        if radiobuttonReadSKU.method in ['readFromLocal', 'readFromGoogleSpreadSheet']:
+        if radiobuttonReadSKU.method in ['readFromLocal', 'readFromGoogleSpreadSheet', 'readExcelAndExportProductToGoogleSpreadSheet']:
             SKU_READ_METHOD = radiobuttonReadSKU.method
             if radiobuttonReadSKU.isChecked():
                 if radiobuttonReadSKU.method == 'readFromLocal':
                     self.labelSkuIdFilename.setHidden(False)
                     self.lineEditSkuIdFilename.show()
-                    self.buttonSKUFilePicker.show()
+                    self.buttonSkuFilePicker.show()
                     self.labelSkuReadMethod.hide()
                     self.radiobuttonExportUrlLocal.hide()
-                    self.radiobuttonExportUrlGoogleSpreadSheet.hide()
-                else:
+                    self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.hide()
+                    self.labelExcelFilename.setHidden(True)
+                    self.lineEditExcelFilename.hide()
+                    self.buttonExcelFilename.hide()
+                elif radiobuttonReadSKU.method == 'readFromGoogleSpreadSheet':
                     self.labelSkuIdFilename.setHidden(True)
                     self.lineEditSkuIdFilename.hide()
-                    self.buttonSKUFilePicker.hide()
+                    self.buttonSkuFilePicker.hide()
                     self.labelSkuReadMethod.show()
                     self.radiobuttonExportUrlLocal.show()
-                    self.radiobuttonExportUrlGoogleSpreadSheet.show()
+                    self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.show()
+                    self.labelExcelFilename.setHidden(True)
+                    self.lineEditExcelFilename.hide()
+                    self.buttonExcelFilename.hide()
+                elif radiobuttonReadSKU.method == 'readExcelAndExportProductToGoogleSpreadSheet':
+                    self.labelSkuIdFilename.setHidden(True)
+                    self.lineEditSkuIdFilename.hide()
+                    self.buttonSkuFilePicker.hide()
+                    self.labelSkuReadMethod.hide()
+                    self.radiobuttonExportUrlLocal.hide()
+                    self.radiobuttonReadExcelAndExportUrlToGoogleSpreadSheet.hide()
+                    self.labelExcelFilename.setHidden(False)
+                    self.lineEditExcelFilename.show()
+                    self.buttonExcelFilename.show()
 
     def onExportMethodToggled(self):
         global SKU_READ_METHOD, EXPORT_METHOD
         radiobuttonExportUrl = self.sender()
-        if radiobuttonExportUrl.method in ['exportToLocal', 'exportToGoogleSpreadSheet']:
+        if radiobuttonExportUrl.method in ['exportToLocal', 'exportUrlToGoogleSpreadSheet']:
             EXPORT_METHOD = radiobuttonExportUrl.method
 
-    def onButtonSKUFilePickerClick(self):
+    def onButtonSkuFilePickerClick(self):
+        global SKU_FILE
         filepath = self.filePicker()
         if (filepath):
             SKU_FILE = filepath
             self.lineEditSkuIdFilename.setText(SKU_FILE)
+
+    def onButtonExcelFilePickerClick(self):
+        global EXCEL_FILE
+        filepath = self.filePicker()
+        if (filepath):
+            if (filepath.endswith('xlsx') == True):
+                EXCEL_FILE = filepath
+                self.lineEditExcelFilename.setText(EXCEL_FILE)
+            else:
+                self.showDialog('Invalid file. Please select a valid excel file.')
 
     def onButtonImageFolderPickerClick(self):
         filepath = self.folderPicker()
@@ -297,7 +386,7 @@ class Widgets(QWidget):
             self.lineEditImageFolder.setText(IMAGES_FOLDER)
 
     def onButtonSubmitClick(self):
-        global BASE_IMAGE_PATH_URL, SKU_ID_EXTRAS, IMAGES_FOLDER, SKU_FILE, SKU_READ_METHOD
+        global BASE_IMAGE_PATH_URL, SKU_ID_EXTRAS, IMAGES_FOLDER, SKU_FILE, SKU_READ_METHOD, EXPORT_METHOD, EXCEL_FILE
         msg = ""
         self.buttonSubmit.setEnabled(False)
         if (self.lineEditBaseImageUrl.text().startswith('https://')):
@@ -312,13 +401,20 @@ class Widgets(QWidget):
         else:
             msg = "No images folder provided"
 
-        if (len(self.lineEditSkuIdFilename.text()) > 0):
-            SKU_FILE = self.lineEditSkuIdFilename.text()
-        else:
-            msg = "No SKU filename provided"
+        SKU_ID_EXTRAS = list(map(lambda x: (x.strip()), list(set(self.lineEditSkuIdVariations.text().strip().split(',')))))
 
-        SKU_ID_EXTRAS = list(set(self.lineEditSkuIdVariations.text().strip().split(',')))
-        SKU_ID_EXTRAS = list(map(lambda x: (x.strip()), SKU_ID_EXTRAS))
+        if (SKU_READ_METHOD == 'readFromLocal'):
+            if (len(self.lineEditSkuIdFilename.text()) > 0):
+                SKU_FILE = self.lineEditSkuIdFilename.text()
+            else:
+                msg = "No SKU filename provided"
+        elif (SKU_READ_METHOD == 'readFromGoogleSpreadSheet'):
+            pass
+        elif (SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet'):
+            if (len(self.lineEditExcelFilename.text()) > 0):
+                SKU_FILE = self.lineEditExcelFilename.text()
+            else:
+                msg = "No SKU filename provided"
 
         if (len(msg) > 0):
             self.showDialog(msg)
@@ -326,6 +422,7 @@ class Widgets(QWidget):
 
         result = generateURLList()
         self.showDialog(result[1], result[0])
+        self.buttonSubmit.setEnabled(True)
 
     def showDialog(self, msgText = "Something went wrong!", status = False):
         msg = QMessageBox()
@@ -345,7 +442,7 @@ class Widgets(QWidget):
             return False
 
     def filePicker(self):
-        filepath = QFileDialog.getOpenFileName(self, "Select a file", "./", "All Files (*);;Text Files (*.txt);;CSV Files (*.csv);;") #
+        filepath = QFileDialog.getOpenFileName(self, "Select a file", "./", "All Files (*);;") #
         if (len(filepath[0]) > 0):
             return filepath[0]
         else:
@@ -367,6 +464,7 @@ if __name__ == '__main__':
     SKU_ID_EXTRAS = config['SKU_ID_EXTRAS']
     IMAGES_FOLDER = config['IMAGES_FOLDER']
     SKU_FILE = config['SKU_FILE']
+    EXCEL_FILE = config['EXCEL_FILE']
     SKU_READ_METHOD = config['SKU_READ_METHOD']
     EXPORT_METHOD = config['EXPORT_METHOD']
     SAMPLE_SPREADSHEET_ID = config['SAMPLE_SPREADSHEET_ID']
