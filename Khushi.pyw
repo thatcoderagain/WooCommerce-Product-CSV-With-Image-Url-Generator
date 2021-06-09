@@ -12,14 +12,13 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 CREDENTIALS = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 SAMPLE_SPREADSHEET_ID = '1S0vxL_-7bGZ64I4b3s86L4T0G8PNf6qoRxr4YxwUsd4'
 READ_RANGE_NAME = 'Data!C2:C1000'
-WRITE_RANGE_NAME_1 = 'Compiled!AD3'
-WRITE_RANGE_NAME_2 = 'Compiled!AN3'
 
 BASE_IMAGE_PATH_URL = 'https://homefabindia.com/wp-content/uploads/images/products/curtains/'
 SKU_ID_EXTRAS = ['5F','6F','7F','8F','9F','Setof2']
 IMAGES_FOLDER = 'Converted images'
 SKU_FILE = 'SKU_List.txt'
 EXCEL_FILE = 'Products.xlsx'
+SHEET_NAME = 'Sheet1'
 SKU_READ_METHOD = 'readFromLocal'
 EXPORT_METHOD = 'exportToLocal'
 PRODUCT_TITLE = ''
@@ -34,13 +33,12 @@ def createConfig():
     configDict = {}
     configDict['SAMPLE_SPREADSHEET_ID'] = SAMPLE_SPREADSHEET_ID
     configDict['READ_RANGE_NAME'] = READ_RANGE_NAME
-    configDict['WRITE_RANGE_NAME_1'] = WRITE_RANGE_NAME_1
-    configDict['WRITE_RANGE_NAME_2'] = WRITE_RANGE_NAME_2
     configDict['BASE_IMAGE_PATH_URL'] = BASE_IMAGE_PATH_URL
     configDict['SKU_ID_EXTRAS'] = sorted(SKU_ID_EXTRAS)
     configDict['IMAGES_FOLDER'] = IMAGES_FOLDER
     configDict['SKU_FILE'] = SKU_FILE
     configDict['EXCEL_FILE'] = EXCEL_FILE
+    configDict['SHEET_NAME'] = SHEET_NAME
     configDict['SKU_READ_METHOD'] = SKU_READ_METHOD
     configDict['EXPORT_METHOD'] = EXPORT_METHOD
     configDict['PRODUCT_TITLE'] = PRODUCT_TITLE
@@ -86,7 +84,6 @@ def readExcel(path, sheetName='Sheet1'):
 
 
 def writeToSpreadSheet(range, data):
-    global SERVICE_ACCOUNT_FILE, SCOPES, CREDENTIALS, SAMPLE_SPREADSHEET_ID, WRITE_RANGE_NAME_1, WRITE_RANGE_NAME_2
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     value_range_body = {}
     value_range_body['values'] = data
@@ -95,7 +92,6 @@ def writeToSpreadSheet(range, data):
 
 
 def clearSheet(sheetName):
-    global CREDENTIALS
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     rangeAll = '{0}!A1:ZZ'.format(sheetName)
     response = service.spreadsheets().values().clear(spreadsheetId=SAMPLE_SPREADSHEET_ID, body={},
@@ -103,24 +99,10 @@ def clearSheet(sheetName):
 
 
 def readSKUIdsFromSpreadSheet():
-    global SERVICE_ACCOUNT_FILE, SCOPES, CREDENTIALS, SAMPLE_SPREADSHEET_ID, READ_RANGE_NAME
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     response = service.spreadsheets().values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=READ_RANGE_NAME).execute()
     values = response.get('values', [])
     return list(map(lambda x: (x[0]), values))
-
-
-def writeImagesURLToSpreadSheet(dateColumn1, dateColumn2):
-    global SERVICE_ACCOUNT_FILE, SCOPES, CREDENTIALS, SAMPLE_SPREADSHEET_ID, WRITE_RANGE_NAME_1, WRITE_RANGE_NAME_2
-    service = build('sheets', 'v4', credentials=CREDENTIALS)
-    value_range_body = {}
-    value_range_body['values'] = dateColumn1
-    response = service.spreadsheets().values().update(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=WRITE_RANGE_NAME_1,
-                                                    valueInputOption="USER_ENTERED", body=value_range_body).execute()
-    value_range_body = {}
-    value_range_body['values'] = dateColumn2
-    response = service.spreadsheets().values().update(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=WRITE_RANGE_NAME_2,
-                                                    valueInputOption="USER_ENTERED", body=value_range_body).execute()
 
 
 def customFilter(string, targets):
@@ -168,7 +150,7 @@ def generateURLList():
     elif SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet':
         if (os.path.exists(EXCEL_FILE) == False):
             return [False, "Oops! Product excel file not found"]
-        data = readExcel(EXCEL_FILE, 'Sheet1')
+        data = readExcel(EXCEL_FILE, SHEET_NAME)
         print("Excel Data: \n", data)
         response = clearSheet('Data')
         print("Read Response: ", response)
@@ -209,7 +191,10 @@ def generateURLList():
             AN3.append([",".join(imagesSet[skuId][1:])])
         AD3 = AD3 + [['']]*(1000 - len(AD3))
         AN3 = AN3 + [['']]*(1000 - len(AN3))
-        writeImagesURLToSpreadSheet(AD3, AN3)
+        response= writeToSpreadSheet('Compiled!AD3', AD3)
+        print("Read Response: ", response)
+        response = writeToSpreadSheet('Compiled!AN3', AN3)
+        print("Read Response: ", response)
 
         primarySku = customFilter(PRIMARY_PRODUCT_SKU, SKU_ID_EXTRAS)
         if primarySku in skuIds:
@@ -223,14 +208,17 @@ def generateURLList():
             fixedLinks = list(map(lambda x: x.strip(), fixedLinks))
             fixedLinks = list(filter(lambda x: x.endswith('.jpg'), fixedLinks))
             fixedLinks = ",".join(fixedLinks)
-            print(primaryImageLinks, fixedLinks)
-            if len(primaryImageLinks) > 0 and len(fixedLinks) > 0:
-                primaryImageLinks = primaryImageLinks+fixedLinks
-            elif len(fixedLinks) > 0:
-                primaryImageLinks = fixedLinks
+        else:
+            fixedLinks = ""
 
-        fixedLinks = ",".join(fixedLinks)
-        response = writeToSpreadSheet('Data!AD2', data)
+        if len(primaryImageLinks) > 0 and len(fixedLinks) > 0:
+            primaryImageLinks = primaryImageLinks+','+fixedLinks
+        elif len(fixedLinks) > 0:
+            primaryImageLinks = fixedLinks
+        primaryImageLinks = primaryImageLinks
+        print("primaryImageLinks: ", primaryImageLinks)
+        response = writeToSpreadSheet('Compiled!AD2', [[primaryImageLinks]])
+        print("Read Response: ", response)
 
     updateConfig(createConfig())
     return [True, "Boom! All done Khushi Goyal :*"]
@@ -488,10 +476,7 @@ class Widgets(QWidget):
                     self.labelExcelFilename.setHidden(True)
                     self.lineEditExcelFilename.hide()
                     self.buttonExcelFilename.hide()
-                    if EXPORT_METHOD == 'exportUrlToGoogleSpreadSheet':
-                        self.radiobuttonUploadProductToGoogleSpreadSheet.setChecked(True)
-                    else:
-                        self.radiobuttonExportUrlToLocal.setChecked(True)
+                    self.radiobuttonExportUrlToLocal.setChecked(True)
                 elif radiobuttonReadSKU.method == 'readExcelAndExportProductToGoogleSpreadSheet':
                     self.labelSkuIdFilename.setHidden(True)
                     self.lineEditSkuIdFilename.hide()
@@ -692,13 +677,12 @@ if __name__ == '__main__':
     config = config()
     SAMPLE_SPREADSHEET_ID = config['SAMPLE_SPREADSHEET_ID'] if 'SAMPLE_SPREADSHEET_ID' in config else SAMPLE_SPREADSHEET_ID
     READ_RANGE_NAME = config['READ_RANGE_NAME'] if 'READ_RANGE_NAME' in config else READ_RANGE_NAME
-    WRITE_RANGE_NAME_1 = config['WRITE_RANGE_NAME_1'] if 'WRITE_RANGE_NAME_1' in config else WRITE_RANGE_NAME_1
-    WRITE_RANGE_NAME_2 = config['WRITE_RANGE_NAME_2'] if 'WRITE_RANGE_NAME_2' in config else WRITE_RANGE_NAME_2
     BASE_IMAGE_PATH_URL = config['BASE_IMAGE_PATH_URL'] if 'BASE_IMAGE_PATH_URL' in config else BASE_IMAGE_PATH_URL
     SKU_ID_EXTRAS = config['SKU_ID_EXTRAS'] if 'SKU_ID_EXTRAS' in config else SKU_ID_EXTRAS
     IMAGES_FOLDER = config['IMAGES_FOLDER'] if 'IMAGES_FOLDER' in config else IMAGES_FOLDER
     SKU_FILE = config['SKU_FILE'] if 'SKU_FILE' in config else SKU_FILE
     EXCEL_FILE = config['EXCEL_FILE'] if 'EXCEL_FILE' in config else EXCEL_FILE
+    SHEET_NAME = config['SHEET_NAME'] if 'SHEET_NAME' in config else SHEET_NAME
     SKU_READ_METHOD = config['SKU_READ_METHOD'] if 'SKU_READ_METHOD' in config else SKU_READ_METHOD
     EXPORT_METHOD = config['EXPORT_METHOD'] if 'EXPORT_METHOD' in config else EXPORT_METHOD
     PRODUCT_TITLE = config['PRODUCT_TITLE'] if 'PRODUCT_TITLE' in config else PRODUCT_TITLE
