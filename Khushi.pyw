@@ -120,6 +120,7 @@ def customFilter(string, targets):
 
 
 def generateURLList():
+    global S_MESSAGE, W_MESSAGE, E_MESSAGE
     updateConfig(createConfig())
     if (os.path.isdir(IMAGES_FOLDER) == False):
         E_MESSAGE = "Oops! Images folder not found"
