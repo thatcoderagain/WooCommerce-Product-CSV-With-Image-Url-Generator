@@ -29,6 +29,13 @@ VARIABLE_POINTS_END_CELL = ''
 FIXED_POINTS_START_CELL = ''
 FIXED_POINTS_END_CELL = ''
 
+SUCCESS = 1
+WARNING = 2
+ERROR = 3
+S_MESSAGE = ''
+W_MESSAGE = ''
+E_MESSAGE = ''
+
 def createConfig():
     configDict = {}
     configDict['SAMPLE_SPREADSHEET_ID'] = SAMPLE_SPREADSHEET_ID
@@ -115,7 +122,8 @@ def customFilter(string, targets):
 def generateURLList():
     updateConfig(createConfig())
     if (os.path.isdir(IMAGES_FOLDER) == False):
-        return [False, "Oops! Images folder not found"]
+        E_MESSAGE = "Oops! Images folder not found"
+        return [ERROR, E_MESSAGE]
 
     listOfFiles = os.listdir(IMAGES_FOLDER)
     images = filter(lambda x: x.endswith('.jpg'), listOfFiles)
@@ -123,7 +131,8 @@ def generateURLList():
     images = sorted(images)
 
     if (len(images) == 0):
-        return [False, "Oops! Images not found in the selected folder"]
+        E_MESSAGE = "Oops! Images not found in the selected folder"
+        return [ERROR, E_MESSAGE]
 
     if SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet' or EXPORT_METHOD == 'exportUrlToGoogleSpreadSheet':
         variablesData = list()
@@ -142,14 +151,16 @@ def generateURLList():
 
     if SKU_READ_METHOD == 'readFromLocal':
         if (os.path.exists(SKU_FILE) == False):
-            return [False, "Oops! SKU file not found"]
+            E_MESSAGE = "Oops! SKU file not found"
+            return [ERROR, E_MESSAGE]
         skuFile = open(SKU_FILE, 'r')
         skuIds = skuFile.readlines()
     elif SKU_READ_METHOD == 'readFromGoogleSpreadSheet':
         skuIds = readSKUIdsFromSpreadSheet()
     elif SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet':
         if (os.path.exists(EXCEL_FILE) == False):
-            return [False, "Oops! Product excel file not found"]
+            E_MESSAGE = "Oops! Product excel file not found"
+            return [ERROR, E_MESSAGE]
         data = readExcel(EXCEL_FILE, SHEET_NAME)
         print("Excel Data: \n", data)
         response = clearSheet('Data')
@@ -162,7 +173,8 @@ def generateURLList():
     skuIds = list(map(lambda x: (customFilter(x, SKU_ID_EXTRAS)), skuIds))
 
     if (len(skuIds) == 0):
-        return [False, "Oops! No SKU ids found for the products"]
+        E_MESSAGE = "Oops! No SKU ids found for the products"
+        return [ERROR, E_MESSAGE]
 
     imagesSet = {}
     for skuId in skuIds:
@@ -191,17 +203,13 @@ def generateURLList():
             AN3.append([",".join(imagesSet[skuId][1:])])
         AD3 = AD3 + [['']]*(1000 - len(AD3))
         AN3 = AN3 + [['']]*(1000 - len(AN3))
-        response= writeToSpreadSheet('Compiled!AD3', AD3)
-        print("Read Response: ", response)
-        response = writeToSpreadSheet('Compiled!AN3', AN3)
-        print("Read Response: ", response)
 
         primarySku = customFilter(PRIMARY_PRODUCT_SKU, SKU_ID_EXTRAS)
         if primarySku in skuIds:
             primaryImageLinks = ",".join(imagesSet[primarySku])
         else:
             primaryImageLinks = ""
-            warning = "Primary SKU doesn't match with any product variant"
+            W_MESSAGE = f"Primary SKU '{primarySku}' doesn't match with any product variant so unable to generate URLs for the primary product"
 
         if (len(PRODUCT_FIXED_IMAGES_LINKS) > 0):
             fixedLinks = PRODUCT_FIXED_IMAGES_LINKS.split(',')
@@ -217,11 +225,20 @@ def generateURLList():
             primaryImageLinks = fixedLinks
         primaryImageLinks = primaryImageLinks
         print("primaryImageLinks: ", primaryImageLinks)
-        response = writeToSpreadSheet('Compiled!AD2', [[primaryImageLinks]])
+
+        AD2 = [[primaryImageLinks]]+AD3
+        response= writeToSpreadSheet('Compiled!AD2', AD2)
+        print("Read Response: ", response)
+        response = writeToSpreadSheet('Compiled!AN3', AN3)
         print("Read Response: ", response)
 
     updateConfig(createConfig())
-    return [True, "Boom! All done Khushi Goyal :*"]
+    S_MESSAGE = "All done Khushi Goyal :*"
+    if (len(W_MESSAGE) > 0):
+        return [WARNING, W_MESSAGE]
+    if (len(E_MESSAGE) > 0):
+        return [ERROR, E_MESSAGE]
+    return [SUCCESS, S_MESSAGE]
 
 
 class Widgets(QWidget):
@@ -569,84 +586,74 @@ class Widgets(QWidget):
 
     def onButtonSubmitClick(self):
         global BASE_IMAGE_PATH_URL, SKU_ID_EXTRAS, IMAGES_FOLDER, SKU_FILE, SKU_READ_METHOD, EXPORT_METHOD, EXCEL_FILE, PRODUCT_TITLE, FIXED_POINTS_START_CELL, FIXED_POINTS_END_CELL, VARIABLE_POINTS_START_CELL, VARIABLE_POINTS_END_CELL, PRIMARY_PRODUCT_SKU, PRODUCT_FIXED_IMAGES_LINKS
-        msg = ""
+        E_MESSAGE = ""
         self.buttonSubmit.setEnabled(False)
-        if (self.lineEditBaseImageUrl.text().startswith('https://')):
+        if (self.lineEditBaseImageUrl.text().strip().startswith('https://')):
             BASE_IMAGE_PATH_URL = self.lineEditBaseImageUrl.text().strip()
             if (BASE_IMAGE_PATH_URL.endswith('/') == False):
                 BASE_IMAGE_PATH_URL = BASE_IMAGE_PATH_URL+'/'
         else:
-            msg = "Invalid base URL provided"
+            E_MESSAGE = "Invalid base URL provided"
 
-        if (len(self.lineEditImageFolder.text()) > 0):
-            IMAGES_FOLDER = self.lineEditImageFolder.text()
+        if (len(self.lineEditImageFolder.text().strip()) > 0):
+            IMAGES_FOLDER = self.lineEditImageFolder.text().strip()
         else:
-            msg = "No images folder provided"
+            E_MESSAGE = "No images folder provided"
 
         SKU_ID_EXTRAS = list(map(lambda x: (x.strip()), list(set(self.lineEditSkuIdVariations.text().strip().split(',')))))
 
         if (SKU_READ_METHOD == 'readFromLocal'):
-            if (len(self.lineEditSkuIdFilename.text()) > 0):
-                SKU_FILE = self.lineEditSkuIdFilename.text()
+            if (len(self.lineEditSkuIdFilename.text().strip()) > 0):
+                SKU_FILE = self.lineEditSkuIdFilename.text().strip()
             else:
-                msg = "No SKU filename provided"
+                E_MESSAGE = "No SKU filename provided"
         elif (SKU_READ_METHOD == 'readFromGoogleSpreadSheet'):
             pass
         elif (SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet'):
-            if (len(self.lineEditExcelFilename.text()) > 0):
-                SKU_FILE = self.lineEditExcelFilename.text()
+            if (len(self.lineEditExcelFilename.text().strip()) > 0):
+                SKU_FILE = self.lineEditExcelFilename.text().strip()
             else:
-                msg = "No SKU filename provided"
+                E_MESSAGE = "No SKU filename provided"
 
         if SKU_READ_METHOD == 'readExcelAndExportProductToGoogleSpreadSheet' or EXPORT_METHOD == 'exportUrlToGoogleSpreadSheet':
-            if (len(self.lineEditPrimaryProductTitle.text()) > 0):
-                PRODUCT_TITLE = self.lineEditPrimaryProductTitle.text()
+            if (len(self.lineEditPrimaryProductTitle.text().strip()) > 0):
+                PRODUCT_TITLE = self.lineEditPrimaryProductTitle.text().strip()
             else:
-                msg = "No product title provided"
+                E_MESSAGE = "No product title provided"
 
-            if (len(self.lineEditFixedBulletPointStart.text()) > 0):
-                FIXED_POINTS_START_CELL = self.lineEditFixedBulletPointStart.text()
+            if (len(self.lineEditFixedBulletPointStart.text().strip()) > 0):
+                FIXED_POINTS_START_CELL = self.lineEditFixedBulletPointStart.text().strip()
             else:
-                msg = "No start cell of fixed bullet point provided"
+                E_MESSAGE = "No start cell of fixed bullet point provided"
 
-            if (len(self.lineEditFixedBulletPointEnd.text()) > 0):
-                FIXED_POINTS_END_CELL = self.lineEditFixedBulletPointEnd.text()
+            if (len(self.lineEditFixedBulletPointEnd.text().strip()) > 0):
+                FIXED_POINTS_END_CELL = self.lineEditFixedBulletPointEnd.text().strip()
             else:
-                msg = "No end cell of fixed bullet point provided"
+                E_MESSAGE = "No end cell of fixed bullet point provided"
 
-            if (len(self.lineEditVariableBulletPointStart.text()) > 0):
-                VARIABLE_POINTS_START_CELL = self.lineEditVariableBulletPointStart.text()
+            if (len(self.lineEditVariableBulletPointStart.text().strip()) > 0):
+                VARIABLE_POINTS_START_CELL = self.lineEditVariableBulletPointStart.text().strip()
             else:
-                msg = "No start cell of variable bullet point provided"
+                E_MESSAGE = "No start cell of variable bullet point provided"
 
-            if (len(self.lineEditVariableBulletPointEnd.text()) > 0):
-                VARIABLE_POINTS_END_CELL = self.lineEditVariableBulletPointEnd.text()
+            if (len(self.lineEditVariableBulletPointEnd.text().strip()) > 0):
+                VARIABLE_POINTS_END_CELL = self.lineEditVariableBulletPointEnd.text().strip()
             else:
-                msg = "No end cell of variable bullet points provided"
+                E_MESSAGE = "No end cell of variable bullet points provided"
 
-            if (len(self.lineEditPrimaryProductSkuId.text()) > 0):
-                PRIMARY_PRODUCT_SKU = self.lineEditPrimaryProductSkuId.text()
+            if (len(self.lineEditPrimaryProductSkuId.text().strip()) > 0):
+                PRIMARY_PRODUCT_SKU = self.lineEditPrimaryProductSkuId.text().strip()
             else:
-                msg = "No SKU for primary product provided"
+                E_MESSAGE = "No SKU for primary product provided"
 
-            PRODUCT_FIXED_IMAGES_LINKS = self.lineEditPrimaryProductFixedImageLinks.text()
+            PRODUCT_FIXED_IMAGES_LINKS = self.lineEditPrimaryProductFixedImageLinks.text().strip()
 
-        if (len(msg) > 0):
-            self.showDialog(msg, False)
+        if (len(E_MESSAGE) > 0):
+            self.showDialog(E_MESSAGE, ERROR)
             return
 
         result = generateURLList()
         self.showDialog(result[1], result[0])
-        self.buttonSubmit.setEnabled(True)
-
-    def showDialog(self, msgText = "Something went wrong!", status = False):
-        msg = QMessageBox()
-        msg.setWindowTitle("Success" if status else "Oops!!!")
-        msg.setIcon(QMessageBox.Information if status else QMessageBox.Critical)
-        msg.setText("Process completed" if status else "Process failed")
-        msg.setDetailedText(f"The details are as follows:\n{msgText}")
-        msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-        msg.exec_()
         self.buttonSubmit.setEnabled(True)
 
     def folderPicker(self):
@@ -662,6 +669,28 @@ class Widgets(QWidget):
             return filepath[0]
         else:
             return False
+
+    def showDialog(self, msgText, status = ERROR):
+        global S_MESSAGE, W_MESSAGE, E_MESSAGE
+        msg = QMessageBox()
+        if status == SUCCESS:
+            msg.setWindowTitle("Success")
+            msg.setIcon(QMessageBox.Information)
+            msg.setText(msgText)
+        elif status == WARNING:
+            msg.setWindowTitle("Warning")
+            msg.setIcon(QMessageBox.Warning)
+            msg.setText(msgText)
+        elif status == ERROR:
+            msg.setWindowTitle("ERROR")
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText(msgText)
+
+        msg.setDetailedText(f"The details are as follows:\n{msgText}")
+        msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        msg.exec_()
+        self.buttonSubmit.setEnabled(True)
+        S_MESSAGE = W_MESSAGE = E_MESSAGE = ''
 
 
 def window():
