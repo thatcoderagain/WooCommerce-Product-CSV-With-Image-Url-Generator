@@ -1,17 +1,18 @@
-import os, sys
-import json
+import os, sys, json, csv
 import pandas
+import gspread
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from oauth2client.service_account import ServiceAccountCredentials
 
 SERVICE_ACCOUNT_FILE = './docs-316004-54c2dd979ce3.json'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 CREDENTIALS = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-SAMPLE_SPREADSHEET_ID = '1S0vxL_-7bGZ64I4b3s86L4T0G8PNf6qoRxr4YxwUsd4'
-READ_RANGE_NAME = 'Data!C2:C1000'
+SPREADSHEET_ID = '1S0vxL_-7bGZ64I4b3s86L4T0G8PNf6qoRxr4YxwUsd4'
+SKU_READ_RANGE = 'Data!C2:C1000'
 
 BASE_IMAGE_PATH_URL = 'https://homefabindia.com/wp-content/uploads/images/products/curtains/'
 SKU_ID_EXTRAS = ['5F','6F','7F','8F','9F','Setof2']
@@ -38,8 +39,8 @@ E_MESSAGE = ''
 
 def createConfig():
     configDict = {}
-    configDict['SAMPLE_SPREADSHEET_ID'] = SAMPLE_SPREADSHEET_ID
-    configDict['READ_RANGE_NAME'] = READ_RANGE_NAME
+    configDict['SPREADSHEET_ID'] = SPREADSHEET_ID
+    configDict['SKU_READ_RANGE'] = SKU_READ_RANGE
     configDict['BASE_IMAGE_PATH_URL'] = BASE_IMAGE_PATH_URL
     configDict['SKU_ID_EXTRAS'] = sorted(SKU_ID_EXTRAS)
     configDict['IMAGES_FOLDER'] = IMAGES_FOLDER
@@ -94,22 +95,64 @@ def writeToSpreadSheet(range, data):
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     value_range_body = {}
     value_range_body['values'] = data
-    response = service.spreadsheets().values().update(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=range,
+    response = service.spreadsheets().values().update(spreadsheetId=SPREADSHEET_ID, range=range,
                                                     valueInputOption="USER_ENTERED", body=value_range_body).execute()
 
 
 def clearSheet(sheetName):
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     rangeAll = '{0}!A1:ZZ'.format(sheetName)
-    response = service.spreadsheets().values().clear(spreadsheetId=SAMPLE_SPREADSHEET_ID, body={},
+    response = service.spreadsheets().values().clear(spreadsheetId=SPREADSHEET_ID, body={},
                                                     range='{0}!A1:Z'.format(sheetName)).execute()
 
 
-def readSKUIdsFromSpreadSheet():
+def readSpreadSheet(read_range):
     service = build('sheets', 'v4', credentials=CREDENTIALS)
-    response = service.spreadsheets().values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID, range=READ_RANGE_NAME).execute()
+    return service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=read_range).execute()
+
+
+def readSKUIdsFromSpreadSheet():
+    response = readSpreadSheet(SKU_READ_RANGE)
     values = response.get('values', [])
     return list(map(lambda x: (x[0]), values))
+
+
+def copyDataToAnotherSheet(source, target):
+    read_range = source+'!A1:ZZ'
+    write_range = target+'!A1'
+    response = readSpreadSheet(read_range)
+    values = response.get('values', [])
+    print("Read Response: ", values)
+    response = writeToSpreadSheet(write_range, values)
+    print("Copied Response: ", response)
+
+
+def createOrClearSheet(sheet_name):
+    client = gspread.authorize(CREDENTIALS)
+    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    worksheet_list = spreadsheet.worksheets()
+    worksheet_list = list(map(lambda x: x.title, worksheet_list))
+    if (sheet_name in worksheet_list):
+        print(f"Deleting old sheet '{sheet_name}'")
+        worksheet = spreadsheet.worksheet(sheet_name)
+        spreadsheet.del_worksheet(worksheet)
+    print(f"Creating New sheet '{sheet_name}'")
+    return spreadsheet.add_worksheet(title=sheet_name, rows="10", cols="10")
+
+
+def writeToCSV(CSV_FILE_NAME, sheet_content):
+    output_file = f'./csv/{CSV_FILE_NAME}.csv'
+    with open(output_file, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(sheet_content.get('values'))
+    f.close()
+
+
+def exportSheetToCSV(sheet_name, csv_file):
+    service = build('sheets', 'v4', credentials=CREDENTIALS)
+    sheet_range = sheet_name+'!A1:ZZ'
+    result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=sheet_range).execute()
+    writeToCSV(csv_file, result)
 
 
 def customFilter(string, targets):
@@ -191,8 +234,8 @@ def generateURLList():
                 imagesSet[skuId] = list(sorted(set(imagesSet[skuId])))
 
     if SKU_READ_METHOD == 'readFromLocal' or EXPORT_METHOD == 'exportToLocal':
-        AD3 = open('AD3.csv', 'w')
-        AN3 = open('AN3.csv', 'w')
+        AD3 = open('./imagesUrls/AD3.csv', 'w')
+        AN3 = open('./imagesUrls/AN3.csv', 'w')
         for skuId in skuIds:
             AD3.write(",".join(imagesSet[skuId][:1])+'\n')
             AN3.write(",".join(imagesSet[skuId][1:])+'\n')
@@ -232,6 +275,11 @@ def generateURLList():
         print("Read Response: ", response)
         response = writeToSpreadSheet('Compiled!AN3', AN3)
         print("Read Response: ", response)
+
+        productSheetName = EXCEL_FILE[EXCEL_FILE.rindex('/')+1 if '/' in EXCEL_FILE else 0:EXCEL_FILE.rindex('.')]
+        createOrClearSheet(productSheetName)
+        copyDataToAnotherSheet('Compiled', productSheetName)
+        exportSheetToCSV(productSheetName, productSheetName)
 
     updateConfig(createConfig())
     S_MESSAGE = "All done Khushi Goyal :*"
@@ -705,8 +753,8 @@ def window():
 
 if __name__ == '__main__':
     config = config()
-    SAMPLE_SPREADSHEET_ID = config['SAMPLE_SPREADSHEET_ID'] if 'SAMPLE_SPREADSHEET_ID' in config else SAMPLE_SPREADSHEET_ID
-    READ_RANGE_NAME = config['READ_RANGE_NAME'] if 'READ_RANGE_NAME' in config else READ_RANGE_NAME
+    SPREADSHEET_ID = config['SPREADSHEET_ID'] if 'SPREADSHEET_ID' in config else SPREADSHEET_ID
+    SKU_READ_RANGE = config['SKU_READ_RANGE'] if 'SKU_READ_RANGE' in config else SKU_READ_RANGE
     BASE_IMAGE_PATH_URL = config['BASE_IMAGE_PATH_URL'] if 'BASE_IMAGE_PATH_URL' in config else BASE_IMAGE_PATH_URL
     SKU_ID_EXTRAS = config['SKU_ID_EXTRAS'] if 'SKU_ID_EXTRAS' in config else SKU_ID_EXTRAS
     IMAGES_FOLDER = config['IMAGES_FOLDER'] if 'IMAGES_FOLDER' in config else IMAGES_FOLDER
