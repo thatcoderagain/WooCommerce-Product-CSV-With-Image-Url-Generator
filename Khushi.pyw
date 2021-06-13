@@ -142,17 +142,17 @@ def createOrClearSheet(sheet_name):
 
 def writeToCSV(CSV_FILE_NAME, sheet_content):
     output_file = f'./csv/{CSV_FILE_NAME}.csv'
-    with open(output_file, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerows(sheet_content.get('values'))
-    f.close()
+    with open(output_file, 'w') as file:
+        writer = csv.writer(file, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerows(sheet_content)
+    file.close()
 
 
 def exportSheetToCSV(sheet_name, csv_file):
     service = build('sheets', 'v4', credentials=CREDENTIALS)
     sheet_range = sheet_name+'!A1:ZZ'
-    result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=sheet_range).execute()
-    writeToCSV(csv_file, result)
+    response = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=sheet_range).execute()
+    writeToCSV(csv_file, response.get('values', []))
 
 
 def customFilter(string, targets):
